@@ -26,6 +26,42 @@ Das bash-Original dient als Referenz: `/home/jarvis/projects/rising-gods-linux-w
   protokolliert (State-File-Inhalt wird ausgegeben, nicht geschrieben).
 - **Drei UI-Backends**: `whiptail` (Default, TTY-Dialoge), `rich` (Terminal-Display),
   `null` (no-op, für CI/dry-run/Headless).
+- **V2-UI/Theming (optional)**: `ice`/`classic`/`mono`-Theme via `--theme`, farblose
+  ASCII-Assets, Layout-Helfer, Cancel/Back-Protokoll. Siehe Abschnitt unten.
+
+## V2 — UI/Theming (optional)
+
+Reine UI/Asset-Erweiterung (kein Step-Rewrite), gekapselt hinter `UIProtocol`
+(Dependency Inversion). Steps rufen nur das Protokoll; Backends rendern Assets.
+
+- **AssetRenderer + Theme** (`ui/assets.py`, `ui/theme.py`): farblose Plaintext-ASCII
+  (`assets/*.txt`) als Quelle + Laufzeit-Theming (Farbe, Box-Decoration). Drei Themes:
+  `ice` (Lich-King Eisblau, Default), `classic` (Gold/Rot), `mono` (reinweiß).
+  `render()` ist rein/deterministisch; `paint()` schreibt auf die Console (Typewriter-
+  Sleep nur hier, zentral).
+- **layout.py** (`ui/layout.py`): deklarative Markup-Helfer `panel`/`divider`/`columns`/
+  `step_header` über Theme/AssetRenderer — ohne I/O.
+- **`--theme` CLI-Flag**: `ice` | `classic` | `mono` (Default `ice`). Steuert Farbe der
+  RichUI/Whiptail-Titel; NullUI ignoriert es (no-op).
+- **Cancel/Back-Protokoll** (`ask_yes_no_c`): neue UI-Methode liefert
+  `bool | "cancel"`. Whiptail bei ESC/RC!=0 → `"cancel"`; Rich bei ESC/Timeout →
+  `"cancel"`; NullUI → `default` (headless = proceed). Steps rufen sie via
+  `getattr(ui, "ask_yes_no_c", None)`; bei `"cancel"` bricht der Step sauber ab, State
+  bleibt unverändert (Resume funktioniert, da State erst am Ende geschrieben wird).
+- **Progress-Senke** (V2-03): optionale `start_progress`/`update_progress`/`stop_progress`
+  im Protokoll (Default no-op). RichUI delegiert an `ui/progress`; Whiptail/NullUI no-op.
+- **RichUI-Integration (V2-04, ABGESCHLOSSEN)**: RichUI instanziiert EINEN `AssetRenderer`
+  (an dieselbe `rich.Console` gebunden) und nutzt ihn in `show_step` (via `layout.step_header`)
+  und `render_banner` (via `AssetRenderer.paint`). Race-freie Progress/Asset-Koordination:
+  `AssetRenderer.paint()` läuft NUR außerhalb eines aktiven Live-Kontextes (vor
+  `Progress.start()` / nach `stop()`) — der Guard ist `self._progress is None`. So entsteht
+  kein ANSI-Flicker-Race zwischen Console-Print und rich Live. `progress.py` selbst wurde
+  NICHT verändert; nur die Senke (RichUI) ist verdrahtet.
+
+> **V2 ist vollständig.** Alle Teile (V2a AssetRenderer/Theme, V2b layout, V2c --theme Flag,
+> V2e progress-Koordination + RichUI-Integration) sind implementiert und grün
+> (ruff + mypy --strict + pytest). V2d (RichUI-eigene Prompts statt whiptail) ist bewusst
+> NICHT gemacht → V3.
 
 ## Installation
 
@@ -65,6 +101,10 @@ python -m rising_gods_wizard --doctor audit
 # Anderes UI-Backend erzwingen
 python -m rising_gods_wizard --ui rich
 python -m rising_gods_wizard --dry-run --ui null
+
+# V2: UI-Theme wählen (ice=Lich-King, classic, mono)
+python -m rising_gods_wizard --ui rich --theme classic
+python -m rising_gods_wizard --dry-run --theme mono
 ```
 
 ### CLI-Flags (`__main__.py`)
@@ -77,6 +117,7 @@ python -m rising_gods_wizard --dry-run --ui null
 | `--step N` | alle (1..17) | Einzelner Step |
 | `--doctor MODE` | — | `audit\|repair\|tune\|hd\|uninstall` |
 | `--ui BACKEND` | `null` bei dry-run, sonst `whiptail` | `whiptail\|rich\|null` |
+| `--theme NAME` | `ice` | `ice\|classic\|mono` (V2, UI-Theming) |
 
 ## Projektstruktur
 
@@ -96,7 +137,8 @@ rising_gods_wizard/
 ├── addons/            # community_fetch (Feature 4), addonhelper, ui, bundles/
 ├── steps/             # registry + step01..step17 (17-Step-Install)
 ├── doctor/            # audit, repair, tune, hd, uninstall
-└── ui/                # interface (Protokoll), whiptail_ui, rich_ui, null_ui, progress
+└── ui/                # interface (Protokoll), whiptail_ui, rich_ui, null_ui, progress,
+│                      #   theme (V2a), assets (V2a AssetRenderer), layout (V2b)
 ```
 
 ## Tests & Qualität

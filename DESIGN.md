@@ -57,7 +57,46 @@ von Upstream (Quellen in `config.COMMUNITY_SOURCES`).
   bevor die korrekte Zeile geschrieben wird (`write_realmlist`).
 - Entscheidung via `ui.ask_yes_no` (echte UI) bzw. Auto-Protokoll bei NullUI/dry-run.
 
-## V1 / V2 / V3 Phasing
+## UI-Subsystem (V2)
+
+Reine UI/Asset-Erweiterung hinter `UIProtocol` (Dependency Inversion). Steps rufen
+nur das Protokoll; konkrete Backends (WhiptailUI/RichUI) kapseln AssetRenderer/Theme/
+Progress. Kein Step-Rewrite, kein neuer State-Mechanismus.
+
+- **AssetRenderer-Design** (`ui/assets.py`): farblose Plaintext-ASCII (`assets/*.txt`)
+  als einzige Quelle. `load_source()` = rein (nur Dateilesen, KeyError bei Unbekannt).
+  `render()` = rein/deterministisch (Style/Gradient/Box/Align als rich-Markup-String,
+  testbar, unabhängig von `typewriter`). `paint()` = einzige Side-Effect-Stelle:
+  schreibt auf `console` (oder no-op bei `console=None`); Typewriter-Sleep EXISTIERT
+  NUR HIER — nie in Steps/Layout (zentrale Animationsstelle, Lint-Review in V2-04).
+- **layout.py** (`ui/layout.py`): reine Markup-Funktionen `panel`/`divider`/`columns`/
+  `step_header` über `Theme`/`AssetRenderer` — OHNE I/O (ruft `render` bewusst nicht).
+- **Theme-Dataclass** (`ui/theme.py`): `Theme(name, primary, accent, banner_style,
+  box_style, gradient)` frozen; `get_theme(name)` mit `ice`-Fallback. Drei Themes:
+  `ice` (Default, Lich-King), `classic`, `mono`.
+- **`--theme` Wiring** (`__main__.py`): `--theme` Flag (ice/classic/mono, Default ice)
+  → `get_theme()` → `RichUI(theme=...)` / `WhiptailUI(theme=...)`; `NullUI` ignoriert.
+- **Cancel/Progress-Protokoll** (`ui/interface.py`): `ask_yes_no_c() -> bool | "cancel"`
+  (distinkter Cancel-Status bei ESC). `start_progress`/`update_progress`/`stop_progress`
+  als optionale Methoden mit no-op Default (Progress-Senke §6). WhiptailUI: ESC/RC!=0 →
+  "cancel". RichUI: ESC/Timeout → "cancel". NullUI → `default`. Steps nutzen
+  `getattr(ui, "ask_yes_no_c", None)`, brechen bei "cancel" sauber ab (State unverändert,
+  Resume ok — State wird erst am Ende geschrieben).
+- **V2d bewusst NICHT gemacht**: RichUI-eigene Prompts statt whiptail bleiben aus (→ V3),
+  da whiptail bewährt/graceful ist und ein eigener Prompt-Layer neues ESC/Cancel-Handling
+  erforderte (Risiko-Minimierung, architect-spec-v2 §5).
+- **V2-04 (ABGESCHLOSSEN)**: RichUI nutzt AssetRenderer in `show_step` (via `layout.step_header`)
+  und `render_banner` (via `AssetRenderer.paint`). Race-freier Display-Koordinator für Progress:
+  RichUI hält EINEN `AssetRenderer` + EINE Progress-Instanz an derselben `rich.Console`.
+  `AssetRenderer.paint()` wird NUR aufgerufen, wenn KEIN aktiver Live-Kontext existiert
+  (`self._progress is None` — also vor `start_progress` / nach `stop_progress`). Dadurch kann
+  kein ANSI-Flicker-Race zwischen `console.print` (Asset) und rich `Live` (Progress) entstehen.
+  `progress.py` wurde NICHT verändert (nur die Senke RichUI verdrahtet). Tests in
+  `tests/test_richui_v2.py` belegen Delegation + Race-Guard.
+
+> **V2-Completion-Note**: V2 (V2a–V2e + RichUI-Integration) ist vollständig und grün
+> (ruff + mypy --strict + pytest, 103 Tests). V2d → V3.
+
 
 - **V1 (dieser Build)**: 17-Step-Install, Bug A, Feature 4+5, Doctor audit/repair/tune/hd/
   uninstall, Dry-Run, drei UI-Backends. Voll ruff- + pytest-konform.

@@ -26,6 +26,7 @@ from .steps import registry as steps_registry
 from .ui import interface
 from .ui.null_ui import NullUI
 from .ui.rich_ui import RichUI
+from .ui.theme import get_theme
 from .ui.whiptail_ui import WhiptailUI
 
 log = logging.getLogger("rising_gods_wizard")
@@ -52,6 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Doctor-Modus: audit|repair|tune|hd|uninstall.")
     p.add_argument("--ui", choices=("whiptail", "rich", "null"), default=None,
                    help="UI-Backend (Default: null bei --dry-run, sonst whiptail).")
+    p.add_argument("--theme", choices=("ice", "classic", "mono"), default="ice",
+                   help="UI-Theme (Default: ice/Lich-King).")
     return p
 
 
@@ -89,12 +92,13 @@ def _choose_ui(args: argparse.Namespace, ctx: WizardContext) -> interface.UIProt
     choice = args.ui
     if choice is None:
         choice = "null" if ctx.dry_run else "whiptail"
+    theme = get_theme(args.theme or "ice")
     if choice == "null":
         return NullUI()
     if choice == "rich":
-        return RichUI(display=not ctx.dry_run)
+        return RichUI(display=not ctx.dry_run, theme=theme)
     # whiptail
-    return WhiptailUI(title="Rising Gods Wizard")
+    return WhiptailUI(title="Rising Gods Wizard", theme=theme)
 
 
 def _dispatch_doctor(args: argparse.Namespace, ctx: WizardContext,

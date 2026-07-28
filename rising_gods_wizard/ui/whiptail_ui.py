@@ -5,6 +5,10 @@ via subprocess gerufen (nicht über actions.shell.run — jenes erzwingt
 capture_output, wodurch whiptail kein Terminal bekäme und nichts anzeigen
 könnte). Ist whiptail nicht installiert, fallen alle Prompts auf das
 NoopUI-Verhalten (Default-Rückgabe) zurück — kein Crash.
+
+V2-03: optionales ``theme``-Argument (steuert primär den Titel-Stil; newt ist
+farblich limitiert). ``ask_yes_no_c`` liefert "cancel" bei ESC/RC!=0.
+Progress-Methoden sind no-op (whiptail hat eigene Fortschrittsanzeige).
 """
 from __future__ import annotations
 
@@ -13,7 +17,8 @@ import subprocess
 import sys
 from typing import Any
 
-from .interface import NoopUI
+from .interface import Cancel, NoopUI
+from .theme import Theme, get_theme
 
 
 class WhiptailUI(NoopUI):
@@ -22,10 +27,12 @@ class WhiptailUI(NoopUI):
         prompts: dict[Any, Any] | None = None,
         actions: Any = None,
         title: str = "Rising Gods Wizard",
+        theme: Theme | None = None,
     ) -> None:
         self._prompts = prompts or {}
         self._actions = actions
         self._title = title
+        self._theme = theme or get_theme("ice")
         self._have = shutil.which("whiptail") is not None
 
     # ── Display (whiptail kann kein Banner/Log; plain stdout/stderr) ────
@@ -49,6 +56,23 @@ class WhiptailUI(NoopUI):
             args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
         ).returncode
         return rc == 0
+
+    def ask_yes_no_c(self, q: str, default: bool = True) -> bool | Cancel:
+        # Ohne whiptail-Binary kein Cancel möglich -> Proceed mit default.
+        if not self._have:
+            return default
+        args = ["whiptail", "--title", self._title, "--yesno", q, "10", "60"]
+        if not default:
+            args.insert(3, "--defaultno")
+        rc = subprocess.run(
+            args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        ).returncode
+        # RC==0 -> Ja, RC==1 -> Nein, RC!=0/ESC -> cancel
+        if rc == 0:
+            return True
+        if rc == 1:
+            return False
+        return "cancel"
 
     def ask_choice(self, q: str, options: list[str], default: str = "") -> str:
         if not self._have or not options:
